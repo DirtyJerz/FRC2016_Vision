@@ -1,0 +1,12 @@
+import numpy as np
+
+# HEIGHT=800
+# WIDTH=1280
+HEIGHT=480
+WIDTH=640
+EXPOSURE=-100
+
+LOWER_BLUE = np.array([50,170,180])
+UPPER_BLUE = np.array([120,255,255])
+
+LED_FLASH_DELAY_MS=200
