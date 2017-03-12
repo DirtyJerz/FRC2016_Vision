@@ -7,8 +7,8 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 NetworkTables.setServerMode()
-sd=NetworkTables.getTable('VisionTable')
+sd=NetworkTables.getTable('SmartDashboard')
 sd.putNumber('GearAlignCorrection', 0)
-sd.putString('opMode', 'Idle')
+sd.putString('PIMode', 'Idle')
 while True:
 	time.sleep(1)

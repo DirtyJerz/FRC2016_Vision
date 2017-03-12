@@ -5,7 +5,8 @@ import imutils, math, time
 from constants import *
 from cameras import getCameras
 from networktables import NetworkTables
-# import RPi.GPIO as GPIO
+import RPi.GPIO as GPIO
+import subprocess as sp
 
 import logging
 logging.basicConfig(level=logging.DEBUG)
@@ -66,34 +67,47 @@ def alignGear():
 def ledFlash():
 	pass
 
-def recordVideo():
-	global running
-	running=True
-	print 'Recording Video'
-	lcap, rcap = getCameras()
-	fourCC=cv2.cv.CV_FOURCC(*'XVID')
-	rightOut = cv2.VideoWriter('rightCam.avi', fourCC, 20.0, (WIDTH, HEIGHT))
-	leftOut = cv2.VideoWriter('leftCam.avi', fourCC, 20.0, (WIDTH, HEIGHT))
-	i=0
-	while(rcap.isOpened() and lcap.isOpened()):
-		retL, lframe = lcap.read()
-		retR, rframe = rcap.read()
-		if retL==True and retR==True:
-			leftOut.write(lframe)
-			cv2.imshow('frame',lframe)
-			if cv2.waitKey(1) & 0xFF == ord('q'):
-				break
-		else:
-			break
-		i+=1
-		if i>20:
-			if not sd.getString('opMode')=='RecordVideo':
-				break
-			i=0
+# def recordVideo():
+# 	print 'Recording Video'
+# 	lcap, rcap = getCameras()
+# 	fourCC=cv2.cv.CV_FOURCC(*'MJPG')
+# 	ts=time.time()
+# 	rightOut = cv2.VideoWriter('rightCam_{}.avi'.format(ts), fourCC, 20.0, (WIDTH, HEIGHT))
+# 	leftOut = cv2.VideoWriter('leftCam_{}.avi'.format(ts), fourCC, 20.0, (WIDTH, HEIGHT))
+# 	i=0
+# 	while(True):
+# 		retL, lframe = lcap.read()
+# 		retR, rframe = rcap.read()
+# 		if retL==True and retR==True:
+# 			leftOut.write(lframe)
+# 			rightOut.write(rframe)
+# 			# cv2.imshow('frame',lframe)
+# 			# if cv2.waitKey(1) & 0xFF == ord('q'):
+# 			# 	break
+# 		else:
+# 			break
+# 		i+=1
+# 		if i>20:
+# 			if not sd.getString('opMode')=='RecordVideo':
+# 				break
+# 			i=0
 
-	lcap.release()
-	rcap.release()
-	cv2.destroyAllWindows()
+# 	lcap.release()
+# 	rcap.release()
+# 	cv2.destroyAllWindows()
+
+def recordVideo():
+	ts=time.time()
+	print sp.call(['v4l2-ctl','-d','/dev/video0','-c','exposure_auto=1'])
+	print sp.call(['v4l2-ctl','-d','/dev/video0','--set-ctrl','exposure_absolute=0'])
+	cmd1 = ['avconv','-s','640x480','-f', 'video4linux2','-i', '/dev/video0', 'leftCam_{}.avi'.format(ts),]
+	pipe1=sp.Popen(cmd1,stdout=sp.PIPE)
+	while True:
+		print 'waiting'
+		if not sd.getString('PIMode')=='RecordVideo':
+			pipe1.terminate()
+			break
+		time.sleep(1)
 
 def serveVideo():
 	# steram gear cams to DS?
@@ -105,7 +119,7 @@ def idle():
 
 def valueChanged(table, key, value, isNew):
 	# print 'VAL CHANGED'
-	if key=='opMode':
+	if key=='PIMode':
 		modes[value]()
 
 modes={ 'GearAlignment': alignGear,
@@ -115,11 +129,11 @@ modes={ 'GearAlignment': alignGear,
 	}
 	
 if __name__ == '__main__':
-	running=False
 	# As a client to connect to a robot
-	NetworkTables.initialize(server='127.0.0.1')
+	# NetworkTables.initialize(server='127.0.0.1')
+	NetworkTables.initialize(server='roborio-2016-frc.local')
 	time.sleep(.5)
-	sd = NetworkTables.getTable('VisionTable')
+	sd = NetworkTables.getTable('SmartDashboard')
 	sd.addTableListener(valueChanged)
 	time.sleep(.5)
 	while True:
