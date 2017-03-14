@@ -1,141 +1,115 @@
+#!/usr/bin/env python
 from __future__ import division
-import cv2 
-import numpy as np
-import imutils, math, time
 from constants import *
 from cameras import getCameras
+from functions import processFrame
 from networktables import NetworkTables
 import RPi.GPIO as GPIO
-import subprocess as sp
+from streamServer import app
+from multiprocessing import Process
+import time, traceback
 
 import logging
-logging.basicConfig(level=logging.DEBUG)
-
-
-
-def processFrame(frame):
-	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-	mask = cv2.inRange(hsv, LOWER_BLUE, UPPER_BLUE)
-	cnts = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-	cnts = cnts[0] if imutils.is_cv2() else cnts[1]
-	c2X=0
-	dicts=[]
-	for c in cnts:
-		# compute the moments of the contour
-		M = cv2.moments(c)
-		#filter smaller shapes
-		if M["m00"]<50:
-			continue
-
-		params={}
-		params['leftmost'] = tuple(c[c[:,:,0].argmin()][0])
-		params['rightmost'] = tuple(c[c[:,:,0].argmax()][0])
-		params['width']=params['rightmost'][0]-params['leftmost'][0]
-		topmost = tuple(c[c[:,:,1].argmin()][0])
-		params['bottmost'] = tuple(c[c[:,:,1].argmax()][0])
-		params['cx'] = int(M["m10"] / M["m00"])
-		params['cy'] = int(M["m01"] / M["m00"])	
-		dicts.append(params)
-		cv2.drawContours(frame, [c], -1, (0, 255, 100), 2)
-
-	return dicts
+logging.basicConfig(filename='/home/pi/FRC2016_Vision/output.log',level=logging.DEBUG)
+logger=logging.getLogger(__name__)
 
 def alignGear():
-	Lcap, Rcap = getCameras()
-	sd = NetworkTables.getTable('SmartDashboard')
-
+	logger.debug('Entered Align Gear Routine')
+	GPIO.output(LED1_PIN, GPIO.HIGH)
+	GPIO.output(LED2_PIN, GPIO.HIGH)
+	time.sleep(1)
+	video = getCameras()
+	dx=1000
+	distINCH=1000
+	theta=1000
 	while True:
-		
-		_,lFrame=Lcap.read()
-		_,rFrame=Rcap.read()
+		try:
+			# logger.debug(sd.getString(MODE_KEY))
+			if not sd.getString(MODE_KEY)=='GearAlignment':
+				GPIO.output(LED1_PIN, GPIO.LOW)
+				GPIO.output(LED2_PIN, GPIO.LOW)
+				logger.debug('Break AlignGear')
+				break
 
-		lparams=processFrame(lFrame)
-		rparams=processFrame(rFrame)
-		if len(lparams) < 1 or len(rparams) < 1:
-			# no targets
-			continue
-		# For straight on bot approach, targets should be equadistant from edge of frame.
-		# (Left camera [ldx]: distance of target right edge to right frame edge. Right camera [rdx]: distance of target left edge to left frame edge.)
-
-		ldx=lFrame.shape[:2][1]-lparams[-1]['rightmost']
-		rdx=rparams['leftmost']
-		dx=rdx-ldx
-		#write dx to network table
-		sd.putNumber('gearAlignCorrection', 2)
-
+			success, frame = video.read()
+			processFrame(frame)
+		except Exception as e:
+			logger.debug(e)
+			traceback.print_exc()
+			raise e
+		finally:
+			sd.putNumber('GearAlignAngleError', theta)
+			sd.putNumber('GearAlignDistance', distINCH)
 
 def ledFlash():
-	pass
-
-# def recordVideo():
-# 	print 'Recording Video'
-# 	lcap, rcap = getCameras()
-# 	fourCC=cv2.cv.CV_FOURCC(*'MJPG')
-# 	ts=time.time()
-# 	rightOut = cv2.VideoWriter('rightCam_{}.avi'.format(ts), fourCC, 20.0, (WIDTH, HEIGHT))
-# 	leftOut = cv2.VideoWriter('leftCam_{}.avi'.format(ts), fourCC, 20.0, (WIDTH, HEIGHT))
-# 	i=0
-# 	while(True):
-# 		retL, lframe = lcap.read()
-# 		retR, rframe = rcap.read()
-# 		if retL==True and retR==True:
-# 			leftOut.write(lframe)
-# 			rightOut.write(rframe)
-# 			# cv2.imshow('frame',lframe)
-# 			# if cv2.waitKey(1) & 0xFF == ord('q'):
-# 			# 	break
-# 		else:
-# 			break
-# 		i+=1
-# 		if i>20:
-# 			if not sd.getString('opMode')=='RecordVideo':
-# 				break
-# 			i=0
-
-# 	lcap.release()
-# 	rcap.release()
-# 	cv2.destroyAllWindows()
-
-def recordVideo():
-	ts=time.time()
-	print sp.call(['v4l2-ctl','-d','/dev/video0','-c','exposure_auto=1'])
-	print sp.call(['v4l2-ctl','-d','/dev/video0','--set-ctrl','exposure_absolute=0'])
-	cmd1 = ['avconv','-s','640x480','-f', 'video4linux2','-i', '/dev/video0', 'leftCam_{}.avi'.format(ts),]
-	pipe1=sp.Popen(cmd1,stdout=sp.PIPE)
+	logger.debug('FlashLEDs')
 	while True:
-		print 'waiting'
-		if not sd.getString('PIMode')=='RecordVideo':
-			pipe1.terminate()
-			break
-		time.sleep(1)
+		logger.debug('FLASH')
+		GPIO.output(LED1_PIN, GPIO.HIGH)
+		GPIO.output(LED2_PIN, GPIO.LOW)
+		time.sleep(LED_FLASH_DELAY_S)
+		GPIO.output(LED1_PIN, GPIO.LOW)
+		GPIO.output(LED2_PIN, GPIO.HIGH)
+		time.sleep(LED_FLASH_DELAY_S)
+		# if not sd.getString(MODE_KEY)=='FlashLEDs':
+			# GPIO.output(LED1_PIN, GPIO.LOW)
+			# GPIO.output(LED2_PIN, GPIO.LOW)
+			# logger.debug('Break FlashLEDs')
+			# break
 
-def serveVideo():
-	# steram gear cams to DS?
-	pass
+def calStream():
+	def worker():
+		app.run(host='0.0.0.0', debug=True, use_reloader=False)
+	calibration=Process(target=worker)
+	calibration.start()
+	GPIO.output(LED1_PIN, GPIO.HIGH)
+	GPIO.output(LED2_PIN, GPIO.HIGH)
+	while sd.getString(MODE_KEY)=='CalibrateVision':
+		pass
+	GPIO.output(LED1_PIN, GPIO.LOW)
+	GPIO.output(LED2_PIN, GPIO.LOW)
+	calibration.terminate()
 
 def idle():
-	print 'Idling'
-
+	GPIO.output(LED1_PIN, GPIO.LOW)
+	GPIO.output(LED2_PIN, GPIO.LOW)
+	logger.debug('Idling')
 
 def valueChanged(table, key, value, isNew):
-	# print 'VAL CHANGED'
-	if key=='PIMode':
+	# logger.debug('VAL CHANGED: {}:{}'.format(key,value))
+	if key==MODE_KEY:
+		logger.debug('Changing MODE: {}:{}'.format(key,value))
 		modes[value]()
 
 modes={ 'GearAlignment': alignGear,
-		'FlashLEDs': ledFlash,
-		'RecordVideo': recordVideo,
+		'CalibrateVision': calStream,
 		'Idle': idle,
 	}
-	
+
 if __name__ == '__main__':
-	# As a client to connect to a robot
-	# NetworkTables.initialize(server='127.0.0.1')
-	NetworkTables.initialize(server='roborio-2016-frc.local')
-	time.sleep(.5)
-	sd = NetworkTables.getTable('SmartDashboard')
-	sd.addTableListener(valueChanged)
-	time.sleep(.5)
-	while True:
-		time.sleep(1)
+	try:
+		stream=None
+		running=True
+		# As a client to connect to a robot
+		# NetworkTables.initialize(server='roborio-2016-frc.local')
+		NetworkTables.initialize(server='oconnor27')
+		time.sleep(.5)
+		sd = NetworkTables.getTable('SmartDashboard')
+		# sd.putString(MODE_KEY, 'Idle')
+		sd.addTableListener(valueChanged)
+		time.sleep(.5)
+		GPIO.setmode(GPIO.BOARD)
+		GPIO.setup(LED1_PIN, GPIO.OUT)
+		GPIO.setup(LED2_PIN, GPIO.OUT)
+		GPIO.output(LED1_PIN, GPIO.LOW)
+		GPIO.output(LED2_PIN, GPIO.LOW)
+		# alignGear()
+		ledFlash()
+		time.sleep(2)
+		while running:
+			time.sleep(1)
+	except Exception as e:
+		logger.error(e)
+	finally:
+		GPIO.cleanup()
 

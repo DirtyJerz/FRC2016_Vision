@@ -1,3 +1,4 @@
+#!/usr/bin/env python 
 import sys
 import time
 from networktables import NetworkTables
@@ -9,6 +10,6 @@ logging.basicConfig(level=logging.DEBUG)
 NetworkTables.setServerMode()
 sd=NetworkTables.getTable('SmartDashboard')
 sd.putNumber('GearAlignCorrection', 0)
-sd.putString('PIMode', 'Idle')
+sd.putString('PIMode2', 'Idle')
 while True:
 	time.sleep(1)
